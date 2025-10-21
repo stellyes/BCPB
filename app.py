@@ -323,7 +323,7 @@ def load_image_file(uploaded_file):
 # === Streamlit App ===
 def main():
     st.set_page_config(
-        page_title="Grassroots Photobooth Processor",
+        page_title="Barbary Coast Photobooth Processor",
         page_icon="📸",
         layout="wide"
     )
@@ -334,7 +334,7 @@ def main():
 
     # Login page
     if not st.session_state.authenticated:
-        st.title("🔒 Grassroots Photobooth Image Processor")
+        st.title("🔒 Barbary Coast Photobooth Image Processor")
         st.write("Please enter the password to access the image processor.")
         
         password = st.text_input("Password", type="password", key="password_input")
@@ -352,7 +352,7 @@ def main():
         return
 
     # Main application (after authentication)
-    st.title("📸 Grassroots Photobooth Image Processor")
+    st.title("📸 Barbary Coast Photobooth Image Processor")
     
     # Logout button in sidebar
     with st.sidebar:
