@@ -6,6 +6,11 @@ import io
 import zipfile
 from pathlib import Path
 import os
+import json
+from pillow_heif import register_heif_opener
+
+# Register HEIF opener for PIL
+register_heif_opener()
 
 # === Password Configuration ===
 # Get password from Streamlit secrets
@@ -13,6 +18,7 @@ CORRECT_PASSWORD = st.secrets["password"]
 
 # === Watermark Configuration ===
 WATERMARK_PATH = "badge.png"
+BRAND_LOGOS_JSON = "brand-logos/brands.json"
 
 # === Image Processing Functions ===
 def remove_background(img):
@@ -277,6 +283,51 @@ def apply_watermark(base_image_array, watermark_image):
     return watermarked_image.convert("RGB")
 
 
+def apply_brand_watermark(base_image_array, brand_watermark_image):
+    """
+    Applies a brand watermark to the top LEFT corner of an image.
+    Uses same margin and opacity as main watermark.
+    Brand logo is centered in a square frame and vertically aligned with main badge.
+    """
+    base_image = Image.fromarray(base_image_array).convert("RGBA")
+    watermark = brand_watermark_image.convert("RGBA")
+
+    # Calculate size for square frame (same width as main watermark)
+    square_size = base_image.width // 4
+    
+    # Create a transparent square frame
+    square_frame = Image.new("RGBA", (square_size, square_size), (0, 0, 0, 0))
+    
+    # Resize brand logo to fit within square while maintaining aspect ratio
+    # Leave some padding (90% of square size)
+    max_logo_size = int(square_size * 0.9)
+    watermark.thumbnail((max_logo_size, max_logo_size), Image.LANCZOS)
+    
+    # Center the logo within the square frame
+    logo_x = (square_size - watermark.width) // 2
+    logo_y = (square_size - watermark.height) // 2
+    square_frame.paste(watermark, (logo_x, logo_y), watermark)
+    
+    # Apply opacity to the entire square frame
+    alpha = square_frame.split()[-1]
+    alpha = alpha.point(lambda i: i * 0.85)
+    square_frame.putalpha(alpha)
+
+    # Position in top left corner with same margin as main watermark
+    margin_ratio = 0.076
+    margin_x = int(base_image.width * margin_ratio)
+    margin_y = int(base_image.height * margin_ratio)
+    pos_x = margin_x
+    pos_y = margin_y
+    position = (pos_x, pos_y)
+
+    watermark_layer = Image.new("RGBA", base_image.size, (0, 0, 0, 0))
+    watermark_layer.paste(square_frame, position, square_frame)
+
+    watermarked_image = Image.alpha_composite(base_image, watermark_layer)
+    return watermarked_image.convert("RGB")
+
+
 def load_watermark():
     """
     Load watermark from badge.png in repository root.
@@ -287,20 +338,108 @@ def load_watermark():
     return None
 
 
+def load_brand_logos():
+    """
+    Load brand logos information from JSON file.
+    Returns dict with brand names as keys and filepaths as values, or None if not found.
+    """
+    if Path(BRAND_LOGOS_JSON).exists():
+        try:
+            with open(BRAND_LOGOS_JSON, 'r') as f:
+                data = json.load(f)
+                # Create a dictionary mapping brand names to filepaths
+                brands = {item['name']: item['filepath'] for item in data['data']}
+                return brands
+        except Exception as e:
+            st.error(f"Error loading brand logos JSON: {str(e)}")
+            return None
+    return None
+
+
+def load_brand_logo_image(filepath):
+    """
+    Load a specific brand logo image from filepath.
+    Returns PIL Image or None if not found.
+    """
+    if Path(filepath).exists():
+        try:
+            return Image.open(filepath)
+        except Exception as e:
+            st.error(f"Error loading brand logo from {filepath}: {str(e)}")
+            return None
+    return None
+
+
 def load_image_file(uploaded_file):
     """
-    Load image from uploaded file, handling various formats including JFIF and AVIF.
+    Load image from uploaded file, handling various formats including JFIF, AVIF, and HEIC.
+    Converts transparent backgrounds to white.
+    Automatically corrects image orientation based on EXIF data.
+    HEIC images are automatically resized to max 3000px to improve processing speed.
+    JPG/JPEG images are automatically resized to max 900px to improve processing speed.
     Returns image as numpy array in BGR format for OpenCV processing.
     """
     try:
-        # For AVIF and other PIL-supported formats, use PIL first then convert to OpenCV
+        # For HEIC, AVIF, JFIF and other PIL-supported formats, use PIL first then convert to OpenCV
         file_ext = uploaded_file.name.lower().split('.')[-1]
         
-        if file_ext in ['avif', 'jfif']:
+        if file_ext in ['heic', 'heif', 'avif', 'jfif', 'jpg', 'jpeg']:
             # Use PIL to open these formats
             pil_image = Image.open(uploaded_file)
-            # Convert to RGB if necessary
-            if pil_image.mode != 'RGB':
+            
+            # Correct orientation based on EXIF data
+            try:
+                from PIL import ImageOps
+                pil_image = ImageOps.exif_transpose(pil_image)
+            except Exception:
+                pass  # If EXIF orientation fails, continue with original
+            
+            # HEIC Pre-processing: Resize large images for faster processing
+            if file_ext in ['heic', 'heif']:
+                max_dimension = 900  # Maximum width or height
+                width, height = pil_image.size
+                
+                # Only resize if image is larger than max_dimension
+                if width > max_dimension or height > max_dimension:
+                    # Calculate new size maintaining aspect ratio
+                    if width > height:
+                        new_width = max_dimension
+                        new_height = int((max_dimension / width) * height)
+                    else:
+                        new_height = max_dimension
+                        new_width = int((max_dimension / height) * width)
+                    
+                    # Resize with high-quality LANCZOS resampling
+                    pil_image = pil_image.resize((new_width, new_height), Image.LANCZOS)
+            
+            # JPG/JPEG Pre-processing: Resize for faster processing
+            if file_ext in ['jpg', 'jpeg']:
+                max_dimension = 900  # Maximum width or height
+                width, height = pil_image.size
+                
+                # Only resize if image is larger than max_dimension
+                if width > max_dimension or height > max_dimension:
+                    # Calculate new size maintaining aspect ratio
+                    if width > height:
+                        new_width = max_dimension
+                        new_height = int((max_dimension / width) * height)
+                    else:
+                        new_height = max_dimension
+                        new_width = int((max_dimension / height) * width)
+                    
+                    # Resize with high-quality LANCZOS resampling
+                    pil_image = pil_image.resize((new_width, new_height), Image.LANCZOS)
+            
+            # Convert transparent backgrounds to white
+            if pil_image.mode in ('RGBA', 'LA', 'P'):
+                # Create white background
+                white_bg = Image.new('RGB', pil_image.size, (255, 255, 255))
+                # If image has transparency, paste it on white background
+                if pil_image.mode == 'P':
+                    pil_image = pil_image.convert('RGBA')
+                white_bg.paste(pil_image, mask=pil_image.split()[-1] if pil_image.mode in ('RGBA', 'LA') else None)
+                pil_image = white_bg
+            elif pil_image.mode != 'RGB':
                 pil_image = pil_image.convert('RGB')
             # Convert PIL to numpy array (RGB)
             img_array = np.array(pil_image)
@@ -309,7 +448,62 @@ def load_image_file(uploaded_file):
         else:
             # Standard OpenCV decoding for common formats
             file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-            img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+            img = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
+            
+            # Correct orientation for standard formats
+            try:
+                from PIL import ImageOps
+                uploaded_file.seek(0)  # Reset file pointer
+                pil_temp = Image.open(uploaded_file)
+                pil_temp = ImageOps.exif_transpose(pil_temp)
+                img_array = np.array(pil_temp)
+                
+                # Convert based on mode
+                if pil_temp.mode == 'RGB':
+                    img = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+                elif pil_temp.mode == 'RGBA':
+                    # Handle transparency
+                    bgr = cv2.cvtColor(img_array[:, :, :3], cv2.COLOR_RGB2BGR)
+                    alpha = img_array[:, :, 3:4] / 255.0
+                    white_bg = np.ones_like(bgr) * 255
+                    img = (bgr * alpha + white_bg * (1 - alpha)).astype(np.uint8)
+                else:
+                    img = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+            except Exception:
+                # Fallback if EXIF processing fails
+                pass
+            
+            # Check if image has alpha channel (transparency)
+            if img is not None and len(img.shape) == 3 and img.shape[2] == 4:
+                # Image has alpha channel - convert to white background
+                # Split into BGR and alpha
+                bgr = img[:, :, :3]
+                alpha = img[:, :, 3:4] / 255.0
+                
+                # Create white background
+                white_bg = np.ones_like(bgr) * 255
+                
+                # Blend: result = foreground * alpha + background * (1 - alpha)
+                img = (bgr * alpha + white_bg * (1 - alpha)).astype(np.uint8)
+            elif img is not None and len(img.shape) == 2:
+                # Grayscale image, convert to BGR
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            
+            # Check if image has alpha channel (transparency)
+            if img is not None and len(img.shape) == 3 and img.shape[2] == 4:
+                # Image has alpha channel - convert to white background
+                # Split into BGR and alpha
+                bgr = img[:, :, :3]
+                alpha = img[:, :, 3:4] / 255.0
+                
+                # Create white background
+                white_bg = np.ones_like(bgr) * 255
+                
+                # Blend: result = foreground * alpha + background * (1 - alpha)
+                img = (bgr * alpha + white_bg * (1 - alpha)).astype(np.uint8)
+            elif img is not None and len(img.shape) == 2:
+                # Grayscale image, convert to BGR
+                img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
             
         if img is None:
             raise ValueError(f"Failed to load image: {uploaded_file.name}")
@@ -331,6 +525,10 @@ def main():
     # Initialize session state for authentication
     if 'authenticated' not in st.session_state:
         st.session_state.authenticated = False
+    
+    # Initialize session state for tips modal
+    if 'show_tips' not in st.session_state:
+        st.session_state.show_tips = False
 
     # Login page
     if not st.session_state.authenticated:
@@ -344,6 +542,7 @@ def main():
             if st.button("Login", type="primary"):
                 if password == CORRECT_PASSWORD:
                     st.session_state.authenticated = True
+                    st.session_state.show_tips = True  # Show tips on first login
                     st.rerun()
                 else:
                     st.error("❌ Incorrect password. Please try again.")
@@ -354,6 +553,33 @@ def main():
     # Main application (after authentication)
     st.title("📸 Barbary Coast Photobooth Image Processor")
     
+    # Tips modal - shows after login
+    if st.session_state.show_tips:
+        with st.container():
+            st.info("### 💡 Tips for Best Results")
+            st.markdown("""
+            **For optimal background removal:**
+            
+            1. **📏 Manually crop your images** to include as little background as possible before uploading. 
+               This significantly improves the effectiveness of the background removal algorithm.
+            
+            2. **🔆 Adjust Pre-Processing Settings** if you encounter issues with background removal:
+               - Use the **Pre-Processing Brightness Boost** slider to lighten dark photos or darken overly bright ones
+               - Adjust the **Pre-Processing Contrast** slider to enhance the distinction between product and background
+               - These settings are available after you upload images, right before processing
+            
+            3. **✨ Best practices:**
+               - Use well-lit photos with even lighting
+               - Avoid shadows on the background when possible
+               - Keep the product clearly separated from the background
+            """)
+            
+            col1, col2, col3 = st.columns([2, 1, 2])
+            with col2:
+                if st.button("Got it! ✓", type="primary", use_container_width=True):
+                    st.session_state.show_tips = False
+                    st.rerun()
+    
     # Logout button in sidebar
     with st.sidebar:
         st.write("### Settings")
@@ -361,44 +587,10 @@ def main():
             st.session_state.authenticated = False
             st.rerun()
         
-        st.write("---")
-        st.write("### Image Adjustments")
-        
-        # Brightness slider
-        brightness_pct = st.slider(
-            "Brightness",
-            min_value=-25,
-            max_value=25,
-            value=3,
-            step=1,
-            format="%d%%",
-            help="Adjust image brightness from -25% to +25%"
-        )
-        brightness_factor = 1.0 + (brightness_pct / 100.0)
-        
-        # Saturation slider
-        saturation_pct = st.slider(
-            "Saturation",
-            min_value=-25,
-            max_value=25,
-            value=3,
-            step=1,
-            format="%d%%",
-            help="Adjust color saturation from -25% to +25%"
-        )
-        saturation_factor = 1.0 + (saturation_pct / 100.0)
-        
-        # Contrast slider
-        contrast_pct = st.slider(
-            "Contrast",
-            min_value=-25,
-            max_value=25,
-            value=2,
-            step=1,
-            format="%d%%",
-            help="Adjust image contrast from -25% to +25%"
-        )
-        contrast_factor = 1.0 + (contrast_pct / 100.0)
+        # Add button to show tips again
+        if st.button("💡 Show Tips"):
+            st.session_state.show_tips = True
+            st.rerun()
         
         st.write("---")
         st.write("### Instructions")
@@ -407,11 +599,14 @@ def main():
         st.write("3. Choose processing mode:")
         st.write("   - **Remove Background + Watermark**: Full processing with background removal")
         st.write("   - **Watermark Only**: Just adds watermark to existing photos")
+        st.write("   - **Remove Background Only**: Removes background without watermark")
         st.write("4. Download processed images")
         
         st.write("---")
         st.write("### Supported Formats")
-        st.write("JPG, JPEG, PNG, JFIF, AVIF")
+        st.write("JPG, JPEG, PNG, JFIF, AVIF, HEIC")
+        st.caption("📱 HEIC images are automatically resized to 3000px max for faster processing")
+        st.caption("📷 JPG/JPEG images are automatically resized to 900px max for faster processing")
         
         st.write("---")
         st.write("### Watermark Status")
@@ -432,8 +627,8 @@ def main():
     # Photo upload
     st.write("## Upload Photos to Process")
     uploaded_files = st.file_uploader(
-        "Upload one or more photos (JPG, PNG, JFIF, AVIF)",
-        type=['png', 'jpg', 'jpeg', 'jfif', 'avif'],
+        "Upload one or more photos (JPG, PNG, JFIF, AVIF, HEIC)",
+        type=['png', 'jpg', 'jpeg', 'jfif', 'avif', 'heic', 'heif'],
         accept_multiple_files=True,
         key="photos"
     )
@@ -445,24 +640,38 @@ def main():
         st.write("### Pre-Processing Adjustment")
         pre_brightness_pct = st.slider(
             "Pre-Processing Brightness Boost",
-            min_value=0,
+            min_value=-25,
+            max_value=50,
+            value=0,
+            step=1,
+            format="%d%%",
+            help="Adjust brightness BEFORE background removal (useful for dark or overly bright photos)"
+        )
+        pre_brightness_factor = 1.0 + (pre_brightness_pct / 100.0)
+        
+        # Pre-processing contrast adjustment
+        pre_contrast_pct = st.slider(
+            "Pre-Processing Contrast",
+            min_value=-25,
             max_value=25,
             value=0,
             step=1,
             format="%d%%",
-            help="Brighten the image BEFORE background removal (useful for dark photos)"
+            help="Adjust contrast BEFORE background removal"
         )
-        pre_brightness_factor = 1.0 + (pre_brightness_pct / 100.0)
+        pre_contrast_factor = 1.0 + (pre_contrast_pct / 100.0)
         
         # Processing mode selection
         st.write("### Select Processing Mode")
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             process_full = st.button("🎨 Remove Background + Watermark", type="primary", use_container_width=True)
         with col2:
             process_watermark_only = st.button("🏷️ Watermark Only", use_container_width=True)
+        with col3:
+            process_background_only = st.button("✂️ Remove Background Only", use_container_width=True)
         
-        if process_full or process_watermark_only:
+        if process_full or process_watermark_only or process_background_only:
             # Create a progress bar
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -476,11 +685,11 @@ def main():
                     # Read image using the new loader function
                     img = load_image_file(uploaded_file)
                     
-                    # Apply pre-processing brightness if needed
-                    if pre_brightness_pct > 0:
+                    # Apply pre-processing brightness and contrast if needed
+                    if pre_brightness_pct != 0 or pre_contrast_pct != 0:
                         img_rgb_pre = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                        img_brightened = apply_image_adjustments(img_rgb_pre, pre_brightness_factor, 1.0, 1.0)
-                        img = cv2.cvtColor(img_brightened, cv2.COLOR_RGB2BGR)
+                        img_adjusted_pre = apply_image_adjustments(img_rgb_pre, pre_brightness_factor, 1.0, pre_contrast_factor)
+                        img = cv2.cvtColor(img_adjusted_pre, cv2.COLOR_RGB2BGR)
                     
                     if process_watermark_only:
                         # Watermark only mode - convert to RGB array
@@ -488,6 +697,12 @@ def main():
                         # Apply adjustments
                         img_adjusted = apply_image_adjustments(img_rgb, brightness_factor, saturation_factor, contrast_factor)
                         final_image = apply_watermark(img_adjusted, watermark_image)
+                    elif process_background_only:
+                        # Background removal only - no watermark
+                        processed = remove_background(img)
+                        # Apply adjustments
+                        final_image_array = apply_image_adjustments(processed, brightness_factor, saturation_factor, contrast_factor)
+                        final_image = Image.fromarray(final_image_array)
                     else:
                         # Full processing mode - remove background + adjustments + watermark
                         processed = remove_background(img)
@@ -544,6 +759,101 @@ def main():
                 type="primary"
             )
         
+        # Brand watermark section
+        st.write("---")
+        st.write("## Add Brand Watermark (Optional)")
+        st.write("Add a brand logo to the top left corner of your processed images.")
+        
+        # Load brand logos
+        brand_logos = load_brand_logos()
+        
+        if brand_logos:
+            col1, col2 = st.columns([2, 2])
+            
+            with col1:
+                # Dropdown for brand selection
+                brand_names = ["None"] + sorted(brand_logos.keys())
+                selected_brand = st.selectbox(
+                    "Select Brand Logo",
+                    options=brand_names,
+                    key="brand_selector"
+                )
+            
+            with col2:
+                # Show preview of selected brand logo with grey background
+                if selected_brand != "None":
+                    brand_logo_path = brand_logos[selected_brand]
+                    brand_logo_img = load_brand_logo_image(brand_logo_path)
+                    if brand_logo_img:
+                        # Create a medium grey background for preview
+                        preview_size = (200, 200)
+                        grey_bg = Image.new('RGB', preview_size, color=(128, 128, 128))
+                        
+                        # Resize logo to fit preview while maintaining aspect ratio
+                        logo_rgba = brand_logo_img.convert('RGBA')
+                        logo_rgba.thumbnail((180, 180), Image.LANCZOS)
+                        
+                        # Center logo on grey background
+                        x = (preview_size[0] - logo_rgba.width) // 2
+                        y = (preview_size[1] - logo_rgba.height) // 2
+                        grey_bg.paste(logo_rgba, (x, y), logo_rgba)
+                        
+                        st.image(grey_bg, caption=f"{selected_brand} Logo", width=150)
+            
+            # Show "Add Brand Watermark" button if a brand is selected
+            if selected_brand != "None":
+                if st.button("🏷️ Add Brand Watermark", type="primary", use_container_width=True):
+                    brand_logo_path = brand_logos[selected_brand]
+                    brand_logo_img = load_brand_logo_image(brand_logo_path)
+                    
+                    if brand_logo_img:
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        branded_images = []
+                        
+                        for idx, img_data in enumerate(st.session_state.processed_images):
+                            try:
+                                status_text.text(f"Adding brand watermark to {img_data['name']}...")
+                                
+                                # Convert existing image to array
+                                img_array = np.array(img_data['image'])
+                                
+                                # Apply brand watermark
+                                final_image = apply_brand_watermark(img_array, brand_logo_img)
+                                
+                                # Convert to bytes for download
+                                img_byte_arr = io.BytesIO()
+                                final_image.save(img_byte_arr, format='JPEG', quality=95)
+                                img_byte_arr.seek(0)
+                                
+                                # Update name to indicate brand
+                                original_name = img_data['name']
+                                name_without_ext = os.path.splitext(original_name)[0]
+                                branded_name = f"{name_without_ext}_branded.jpg"
+                                
+                                branded_images.append({
+                                    'name': branded_name,
+                                    'data': img_byte_arr.getvalue(),
+                                    'image': final_image
+                                })
+                                
+                                progress_bar.progress((idx + 1) / len(st.session_state.processed_images))
+                                
+                            except Exception as e:
+                                st.error(f"❌ Error adding brand watermark to {img_data['name']}: {str(e)}")
+                        
+                        status_text.text("✅ Brand watermarking complete!")
+                        
+                        # Store branded images in session state
+                        st.session_state.branded_images = branded_images
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Could not load brand logo: {brand_logo_path}")
+        else:
+            st.warning("⚠️ Brand logos JSON file not found. Please add brand-logos/brands.json to your repository.")
+        
+        st.write("---")
         st.write("### Preview and Individual Downloads")
         
         # Display processed images in a grid
@@ -559,6 +869,44 @@ def main():
                     key=f"download_{idx}"
                 )
     
+    # Display branded images if they exist
+    if 'branded_images' in st.session_state and st.session_state.branded_images:
+        st.write("---")
+        st.write("## Download Branded Images")
+        
+        # Create zip file for branded images
+        zip_buffer_branded = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer_branded, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for img_data in st.session_state.branded_images:
+                zip_file.writestr(f"branded_{img_data['name']}", img_data['data'])
+        
+        zip_buffer_branded.seek(0)
+        
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            st.download_button(
+                label="📦 Download All Branded as ZIP",
+                data=zip_buffer_branded.getvalue(),
+                file_name="branded_photos.zip",
+                mime="application/zip",
+                type="primary"
+            )
+        
+        st.write("### Branded Images Preview")
+        
+        # Display branded images in a grid
+        cols = st.columns(3)
+        for idx, img_data in enumerate(st.session_state.branded_images):
+            with cols[idx % 3]:
+                st.image(img_data['image'], caption=img_data['name'], use_container_width=True)
+                st.download_button(
+                    label=f"⬇️ Download",
+                    data=img_data['data'],
+                    file_name=f"branded_{img_data['name']}",
+                    mime="image/jpeg",
+                    key=f"download_branded_{idx}"
+                )
+    
     elif uploaded_files:
         st.info("👆 Choose a processing mode above to begin!")
     else:
@@ -567,3 +915,42 @@ def main():
 
 if __name__ == "__main__":
     main()
+        st.write("### Image Adjustments")
+        
+        # Brightness slider
+        brightness_pct = st.slider(
+            "Brightness",
+            min_value=-25,
+            max_value=25,
+            value=3,
+            step=1,
+            format="%d%%",
+            help="Adjust image brightness from -25% to +25%"
+        )
+        brightness_factor = 1.0 + (brightness_pct / 100.0)
+        
+        # Saturation slider
+        saturation_pct = st.slider(
+            "Saturation",
+            min_value=-25,
+            max_value=25,
+            value=3,
+            step=1,
+            format="%d%%",
+            help="Adjust color saturation from -25% to +25%"
+        )
+        saturation_factor = 1.0 + (saturation_pct / 100.0)
+        
+        # Contrast slider
+        contrast_pct = st.slider(
+            "Contrast",
+            min_value=-25,
+            max_value=25,
+            value=2,
+            step=1,
+            format="%d%%",
+            help="Adjust image contrast from -25% to +25%"
+        )
+        contrast_factor = 1.0 + (contrast_pct / 100.0)
+        
+        st.write("---")
