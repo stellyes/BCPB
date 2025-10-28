@@ -532,7 +532,7 @@ def main():
 
     # Login page
     if not st.session_state.authenticated:
-        st.title("🔒 Barbary Coast Photobooth Image Processor")
+        st.title("🔒 Barbary Coast Image Processor")
         st.write("Please enter the password to access the image processor.")
         
         password = st.text_input("Password", type="password", key="password_input")
@@ -551,7 +551,7 @@ def main():
         return
 
     # Main application (after authentication)
-    st.title("📸 Barbary Coast Photobooth Image Processor")
+    st.title("📸 Barbary Coast Image Processor")
     
     # Tips modal - shows after login
     if st.session_state.show_tips:
@@ -591,6 +591,45 @@ def main():
         if st.button("💡 Show Tips"):
             st.session_state.show_tips = True
             st.rerun()
+        
+        st.write("---")
+        st.write("### Image Adjustments")
+        
+        # Brightness slider
+        brightness_pct = st.slider(
+            "Brightness",
+            min_value=-25,
+            max_value=25,
+            value=3,
+            step=1,
+            format="%d%%",
+            help="Adjust image brightness from -25% to +25%"
+        )
+        brightness_factor = 1.0 + (brightness_pct / 100.0)
+        
+        # Saturation slider
+        saturation_pct = st.slider(
+            "Saturation",
+            min_value=-25,
+            max_value=25,
+            value=3,
+            step=1,
+            format="%d%%",
+            help="Adjust color saturation from -25% to +25%"
+        )
+        saturation_factor = 1.0 + (saturation_pct / 100.0)
+        
+        # Contrast slider
+        contrast_pct = st.slider(
+            "Contrast",
+            min_value=-25,
+            max_value=25,
+            value=2,
+            step=1,
+            format="%d%%",
+            help="Adjust image contrast from -25% to +25%"
+        )
+        contrast_factor = 1.0 + (contrast_pct / 100.0)
         
         st.write("---")
         st.write("### Instructions")
@@ -915,42 +954,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-        st.write("### Image Adjustments")
-        
-        # Brightness slider
-        brightness_pct = st.slider(
-            "Brightness",
-            min_value=-25,
-            max_value=25,
-            value=3,
-            step=1,
-            format="%d%%",
-            help="Adjust image brightness from -25% to +25%"
-        )
-        brightness_factor = 1.0 + (brightness_pct / 100.0)
-        
-        # Saturation slider
-        saturation_pct = st.slider(
-            "Saturation",
-            min_value=-25,
-            max_value=25,
-            value=3,
-            step=1,
-            format="%d%%",
-            help="Adjust color saturation from -25% to +25%"
-        )
-        saturation_factor = 1.0 + (saturation_pct / 100.0)
-        
-        # Contrast slider
-        contrast_pct = st.slider(
-            "Contrast",
-            min_value=-25,
-            max_value=25,
-            value=2,
-            step=1,
-            format="%d%%",
-            help="Adjust image contrast from -25% to +25%"
-        )
-        contrast_factor = 1.0 + (contrast_pct / 100.0)
-        
-        st.write("---")
