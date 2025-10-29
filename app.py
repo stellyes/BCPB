@@ -260,7 +260,7 @@ def has_transparency(pil_image):
 def process_transparent_image(img_rgb, margin_ratio=0.02):
     """
     Process an image that already has transparency.
-    Creates square bounding box around non-transparent content and applies margins.
+    Creates the most efficient square bounding box around non-transparent content with minimal margins.
     Returns processed image as numpy array.
     """
     # Convert to RGBA if not already
@@ -274,8 +274,8 @@ def process_transparent_image(img_rgb, margin_ratio=0.02):
     # Extract alpha channel
     alpha = img_rgba[:, :, 3]
     
-    # Find bounding box of non-transparent pixels
-    non_transparent = alpha > 10  # Threshold for near-transparent
+    # Find bounding box of non-transparent pixels (very aggressive threshold)
+    non_transparent = alpha > 5  # Very low threshold to capture all visible content
     coords = np.argwhere(non_transparent)
     
     if len(coords) == 0:
@@ -284,17 +284,17 @@ def process_transparent_image(img_rgb, margin_ratio=0.02):
     y_min, x_min = coords.min(axis=0)
     y_max, x_max = coords.max(axis=0)
     
-    # Add padding
-    padding = 15
-    y_min = max(0, y_min - padding)
-    x_min = max(0, x_min - padding)
-    y_max = min(img_rgba.shape[0], y_max + padding)
-    x_max = min(img_rgba.shape[1], x_max + padding)
+    # No padding - we want the tightest possible crop
+    # Just add 1 pixel to avoid edge artifacts
+    y_min = max(0, y_min - 1)
+    x_min = max(0, x_min - 1)
+    y_max = min(img_rgba.shape[0], y_max + 1)
+    x_max = min(img_rgba.shape[1], x_max + 1)
     
     w = x_max - x_min
     h = y_max - y_min
     
-    # Calculate square crop with margins
+    # Calculate square crop with minimal margins
     object_ratio = 1 - 2 * margin_ratio
     max_dim = max(w, h)
     square_size = int(max_dim / object_ratio)
