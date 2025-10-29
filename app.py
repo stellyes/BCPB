@@ -823,9 +823,9 @@ def main():
                         if has_transparency:
                             img_rgb = process_transparent_image(img_rgb)
                         
-                            # Apply adjustments
-                            img_adjusted = apply_image_adjustments(img_rgb, brightness_factor, saturation_factor, contrast_factor)
-                            final_image = apply_watermark(img_adjusted, watermark_image)
+                        # Apply adjustments
+                        img_adjusted = apply_image_adjustments(img_rgb, brightness_factor, saturation_factor, contrast_factor)
+                        final_image = apply_watermark(img_adjusted, watermark_image)
                     elif process_background_only:
                         # Background removal only - no watermark
                         if has_transparency:
