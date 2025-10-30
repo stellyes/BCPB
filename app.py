@@ -479,8 +479,7 @@ def load_image_file(uploaded_file):
     Load image from uploaded file, handling various formats including JFIF, AVIF, and HEIC.
     Converts transparent backgrounds to white.
     Automatically corrects image orientation based on EXIF data.
-    HEIC images are automatically resized to max 3000px to improve processing speed.
-    JPG/JPEG images are automatically resized to max 900px to improve processing speed.
+    All images are automatically resized to max 900x900px to improve processing speed.
     Returns tuple: (image as numpy array in BGR format, has_transparency flag)
     """
     try:
@@ -501,35 +500,19 @@ def load_image_file(uploaded_file):
             except Exception:
                 pass  # If EXIF orientation fails, continue with original
             
-            # HEIC Pre-processing: Resize large images for faster processing
-            if file_ext in ['heic', 'heif']:
-                max_dimension = 900
-                width, height = pil_image.size
-                
-                if width > max_dimension or height > max_dimension:
-                    if width > height:
-                        new_width = max_dimension
-                        new_height = int((max_dimension / width) * height)
-                    else:
-                        new_height = max_dimension
-                        new_width = int((max_dimension / height) * width)
-                    
-                    pil_image = pil_image.resize((new_width, new_height), Image.LANCZOS)
+            # Resize ALL images to max 900x900px (maintaining aspect ratio)
+            max_dimension = 900
+            width, height = pil_image.size
             
-            # JPG/JPEG Pre-processing: Resize for faster processing
-            if file_ext in ['jpg', 'jpeg']:
-                max_dimension = 900
-                width, height = pil_image.size
+            if width > max_dimension or height > max_dimension:
+                if width > height:
+                    new_width = max_dimension
+                    new_height = int((max_dimension / width) * height)
+                else:
+                    new_height = max_dimension
+                    new_width = int((max_dimension / height) * width)
                 
-                if width > max_dimension or height > max_dimension:
-                    if width > height:
-                        new_width = max_dimension
-                        new_height = int((max_dimension / width) * height)
-                    else:
-                        new_height = max_dimension
-                        new_width = int((max_dimension / height) * width)
-                    
-                    pil_image = pil_image.resize((new_width, new_height), Image.LANCZOS)
+                pil_image = pil_image.resize((new_width, new_height), Image.LANCZOS)
             
             # Convert transparent backgrounds to white
             if pil_image.mode in ('RGBA', 'LA', 'P'):
@@ -729,8 +712,7 @@ def main():
         st.write("---")
         st.write("### Supported Formats")
         st.write("JPG, JPEG, PNG, JFIF, AVIF, HEIC")
-        st.caption("📱 HEIC images are automatically resized to 3000px max for faster processing")
-        st.caption("📷 JPG/JPEG images are automatically resized to 900px max for faster processing")
+        st.caption("📐 All images are automatically resized to max 900x900px for optimal processing")
         
         st.write("---")
         st.write("### Watermark Status")
