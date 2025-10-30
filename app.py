@@ -771,7 +771,7 @@ def main():
         pre_exposure_pct = st.slider(
             "Pre-Processing Exposure Boost",
             min_value=0,
-            max_value=75,
+            max_value=100,
             value=0,
             step=1,
             format="%d%%",
